@@ -59,6 +59,7 @@ class AppWindow(QMainWindow):
         self.setCentralWidget(tabs)
         self.setStatusBar(QStatusBar())
 
+        self.preview_page.printCalibrationRequested.connect(self.print_calibration_page)
         self.preview_page.clearRequested.connect(self.clear_current_queue)
         self.preview_page.exportRequested.connect(self.export_current_page)
         self.preview_page.printRequested.connect(self.print_current_batch)
@@ -87,9 +88,12 @@ class AppWindow(QMainWindow):
     def refresh_batch(self) -> None:
         batch = self.repository.get_current_batch(self.settings.watch_folder)
         total_pending = self.repository.count_pending(self.settings.watch_folder)
-        self.preview_page.set_batch(batch, total_pending)
+        self.preview_page.set_batch(batch, total_pending, self.settings.watch_folder)
         self._sync_print_button_state()
-        self.statusBar().showMessage(f"当前监听文件夹待打印照片：{total_pending} 张", 3000)
+        self.statusBar().showMessage(
+            f"当前监听文件夹待打印照片：{total_pending} 张，本页显示：{len(batch)} 张",
+            3000,
+        )
 
     def handle_settings_changed(self, settings: AppSettings) -> None:
         self.settings = AppSettings(
@@ -154,6 +158,17 @@ class AppWindow(QMainWindow):
         self.repository.mark_printed([item.record.md5 for item in batch])
         self.refresh_batch()
         self.statusBar().showMessage(message, 5000)
+
+    def print_calibration_page(self) -> None:
+        success, message = self.print_service.print_calibration_page(
+            self.settings.printer_name or "",
+            self.settings.export_dpi,
+        )
+        if not success:
+            self.show_warning(message)
+            return
+
+        self.statusBar().showMessage(message, 8000)
 
     def _sync_print_button_state(self) -> None:
         if self.settings.printer_name:

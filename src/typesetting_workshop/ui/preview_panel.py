@@ -20,6 +20,7 @@ from typesetting_workshop.ui.preview_canvas import PreviewCanvas
 class PreviewPanel(QWidget):
     exportRequested = Signal()
     printRequested = Signal()
+    printCalibrationRequested = Signal()
     clearRequested = Signal()
     cropChanged = Signal(str, object)
 
@@ -31,15 +32,22 @@ class PreviewPanel(QWidget):
         root_layout.setContentsMargins(16, 16, 16, 16)
         root_layout.setSpacing(12)
 
+        self.watch_folder_label = QLabel("当前监听文件夹：未设置")
+        self.watch_folder_label.setWordWrap(True)
+        self.watch_folder_label.setStyleSheet("font-size: 13px; color: #475467;")
+        root_layout.addWidget(self.watch_folder_label)
+
         toolbar_layout = QHBoxLayout()
-        self.summary_label = QLabel("待打印照片：0")
+        self.summary_label = QLabel("总待打印：0 张，本页显示：0 / 6，剩余待打印：0 张")
         self.summary_label.setStyleSheet("font-size: 14px; font-weight: 600;")
         toolbar_layout.addWidget(self.summary_label)
         toolbar_layout.addStretch(1)
 
+        self.calibration_button = QPushButton("打印校准页")
         self.clear_button = QPushButton("清空当前队列")
         self.export_button = QPushButton("导出当前排版 PNG")
         self.print_button = QPushButton("打印当前批次")
+        toolbar_layout.addWidget(self.calibration_button)
         toolbar_layout.addWidget(self.clear_button)
         toolbar_layout.addWidget(self.export_button)
         toolbar_layout.addWidget(self.print_button)
@@ -80,6 +88,7 @@ class PreviewPanel(QWidget):
         content_layout.addWidget(sidebar)
         root_layout.addLayout(content_layout)
 
+        self.calibration_button.clicked.connect(self.printCalibrationRequested.emit)
         self.clear_button.clicked.connect(self.clearRequested.emit)
         self.export_button.clicked.connect(self.exportRequested.emit)
         self.print_button.clicked.connect(self.printRequested.emit)
@@ -87,10 +96,18 @@ class PreviewPanel(QWidget):
         self.canvas.photoSelected.connect(self._handle_selection_changed)
         self.canvas.cropChanged.connect(self._handle_crop_changed)
 
-    def set_batch(self, batch: list[PlacedPhoto], total_pending: int) -> None:
+    def set_batch(self, batch: list[PlacedPhoto], total_pending: int, watch_folder: str) -> None:
         self.batch = batch
         self.canvas.set_batch(batch)
-        self.summary_label.setText(f"待打印照片：{total_pending} 张，本页展示：{len(batch)} / 6")
+
+        remaining = max(total_pending - len(batch), 0)
+        self.watch_folder_label.setText(
+            f"当前监听文件夹：{watch_folder if watch_folder else '未设置'}"
+        )
+        self.summary_label.setText(
+            f"总待打印：{total_pending} 张，本页显示：{len(batch)} / 6，剩余待打印：{remaining} 张"
+        )
+
         has_batch = bool(batch)
         self.clear_button.setEnabled(has_batch)
         self.export_button.setEnabled(has_batch)
@@ -102,7 +119,9 @@ class PreviewPanel(QWidget):
 
     def set_print_enabled(self, enabled: bool, reason: str | None = None) -> None:
         self.print_button.setEnabled(enabled and bool(self.batch))
+        self.calibration_button.setEnabled(enabled)
         self.print_button.setToolTip(reason or "")
+        self.calibration_button.setToolTip(reason or "")
 
     def _handle_selection_changed(self, md5_value: str | None) -> None:
         if md5_value is None:

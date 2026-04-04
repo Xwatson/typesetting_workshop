@@ -66,13 +66,13 @@ class QueueRepository:
             )
 
     @staticmethod
-    def _folder_patterns(watch_folder: str | None) -> tuple[str, str, str] | None:
+    def _normalized_folder(watch_folder: str | None) -> str | None:
         if not watch_folder:
             return None
-        normalized = watch_folder.rstrip("\\/")
+        normalized = watch_folder.replace("\\", "/").rstrip("/")
         if not normalized:
             return None
-        return normalized, f"{normalized}/%", f"{normalized}\\%"
+        return normalized
 
     def load_settings(self) -> AppSettings:
         with self._connect() as connection:
@@ -137,7 +137,7 @@ class QueueRepository:
             return True
 
     def get_current_batch(self, watch_folder: str | None = None, limit: int = 6) -> list[PlacedPhoto]:
-        folder_patterns = self._folder_patterns(watch_folder)
+        normalized_folder = self._normalized_folder(watch_folder)
         query = """
             SELECT
                 p.id,
@@ -155,15 +155,14 @@ class QueueRepository:
             WHERE p.status = 'pending'
         """
         params: tuple[object, ...]
-        if folder_patterns is not None:
+        if normalized_folder is not None:
             query += """
                 AND (
-                    p.source_path = ?
-                    OR p.source_path LIKE ?
-                    OR p.source_path LIKE ?
+                    REPLACE(p.source_path, '\\', '/') = ?
+                    OR REPLACE(p.source_path, '\\', '/') LIKE ?
                 )
             """
-            params = (*folder_patterns, limit)
+            params = (normalized_folder, f"{normalized_folder}/%", limit)
         else:
             params = (limit,)
         query += """
@@ -198,9 +197,9 @@ class QueueRepository:
         return placed
 
     def count_pending(self, watch_folder: str | None = None) -> int:
-        folder_patterns = self._folder_patterns(watch_folder)
+        normalized_folder = self._normalized_folder(watch_folder)
         with self._connect() as connection:
-            if folder_patterns is None:
+            if normalized_folder is None:
                 row = connection.execute(
                     "SELECT COUNT(*) AS count FROM photos WHERE status = 'pending'"
                 ).fetchone()
@@ -211,12 +210,11 @@ class QueueRepository:
                     FROM photos
                     WHERE status = 'pending'
                       AND (
-                          source_path = ?
-                          OR source_path LIKE ?
-                          OR source_path LIKE ?
+                          REPLACE(source_path, '\\', '/') = ?
+                          OR REPLACE(source_path, '\\', '/') LIKE ?
                       )
                     """,
-                    folder_patterns,
+                    (normalized_folder, f"{normalized_folder}/%"),
                 ).fetchone()
         return int(row["count"])
 
@@ -233,9 +231,9 @@ class QueueRepository:
             )
 
     def clear_pending(self, watch_folder: str | None = None) -> int:
-        folder_patterns = self._folder_patterns(watch_folder)
+        normalized_folder = self._normalized_folder(watch_folder)
         with self._connect() as connection:
-            if folder_patterns is None:
+            if normalized_folder is None:
                 cursor = connection.execute("DELETE FROM photos WHERE status = 'pending'")
             else:
                 cursor = connection.execute(
@@ -243,12 +241,11 @@ class QueueRepository:
                     DELETE FROM photos
                     WHERE status = 'pending'
                       AND (
-                          source_path = ?
-                          OR source_path LIKE ?
-                          OR source_path LIKE ?
+                          REPLACE(source_path, '\\', '/') = ?
+                          OR REPLACE(source_path, '\\', '/') LIKE ?
                       )
                     """,
-                    folder_patterns,
+                    (normalized_folder, f"{normalized_folder}/%"),
                 )
         return cursor.rowcount
 
