@@ -14,6 +14,11 @@ dependencies = [
     "watchdog>=6.0",
 ]
 
+[project.optional-dependencies]
+build = [
+    "pyinstaller>=6.11",
+]
+
 [project.scripts]
 typesetting-workshop = "typesetting_workshop.app:main"
 
