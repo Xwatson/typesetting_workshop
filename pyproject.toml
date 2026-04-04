@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "typesetting-workshop"
+version = "0.1.0"
+description = "Cross-platform desktop app for A4 photo typesetting and printing."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "PySide6>=6.8",
+    "Pillow>=11.0",
+    "watchdog>=6.0",
+]
+
+[project.scripts]
+typesetting-workshop = "typesetting_workshop.app:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
