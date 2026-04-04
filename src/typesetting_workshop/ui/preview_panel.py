@@ -20,6 +20,7 @@ from typesetting_workshop.ui.preview_canvas import PreviewCanvas
 class PreviewPanel(QWidget):
     exportRequested = Signal()
     printRequested = Signal()
+    clearRequested = Signal()
     cropChanged = Signal(str, object)
 
     def __init__(self, renderer: RendererService, parent: QWidget | None = None) -> None:
@@ -36,8 +37,10 @@ class PreviewPanel(QWidget):
         toolbar_layout.addWidget(self.summary_label)
         toolbar_layout.addStretch(1)
 
+        self.clear_button = QPushButton("清空当前队列")
         self.export_button = QPushButton("导出当前排版 PNG")
         self.print_button = QPushButton("打印当前批次")
+        toolbar_layout.addWidget(self.clear_button)
         toolbar_layout.addWidget(self.export_button)
         toolbar_layout.addWidget(self.print_button)
         root_layout.addLayout(toolbar_layout)
@@ -65,9 +68,7 @@ class PreviewPanel(QWidget):
         self.zoom_label = QLabel("缩放：-")
         sidebar_layout.addWidget(self.zoom_label)
 
-        tip_label = QLabel(
-            "滚轮可缩放照片，按住鼠标左键拖拽可调整照片在画框中的裁切位置。"
-        )
+        tip_label = QLabel("滚轮可缩放照片，按住鼠标左键拖拽可调整照片在画框中的裁切位置。")
         tip_label.setWordWrap(True)
         tip_label.setAlignment(Qt.AlignmentFlag.AlignTop)
         sidebar_layout.addWidget(tip_label)
@@ -79,6 +80,7 @@ class PreviewPanel(QWidget):
         content_layout.addWidget(sidebar)
         root_layout.addLayout(content_layout)
 
+        self.clear_button.clicked.connect(self.clearRequested.emit)
         self.export_button.clicked.connect(self.exportRequested.emit)
         self.print_button.clicked.connect(self.printRequested.emit)
         self.reset_button.clicked.connect(self.canvas.reset_selected_crop)
@@ -90,6 +92,7 @@ class PreviewPanel(QWidget):
         self.canvas.set_batch(batch)
         self.summary_label.setText(f"待打印照片：{total_pending} 张，本页展示：{len(batch)} / 6")
         has_batch = bool(batch)
+        self.clear_button.setEnabled(has_batch)
         self.export_button.setEnabled(has_batch)
         self.print_button.setEnabled(has_batch)
         if not has_batch:

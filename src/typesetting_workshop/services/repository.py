@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 from contextlib import contextmanager
 from datetime import UTC, datetime
+from os import sep
 from pathlib import Path
 from typing import Iterator
 
@@ -64,6 +65,15 @@ class QueueRepository:
                 ON photos(status, discovered_at);
                 """
             )
+
+    @staticmethod
+    def _folder_prefix(watch_folder: str | None) -> str | None:
+        if not watch_folder:
+            return None
+        normalized = watch_folder.rstrip("\\/")
+        if not normalized:
+            return None
+        return f"{normalized}{sep}%"
 
     def load_settings(self) -> AppSettings:
         with self._connect() as connection:
@@ -127,29 +137,37 @@ class QueueRepository:
             )
             return True
 
-    def get_current_batch(self, limit: int = 6) -> list[PlacedPhoto]:
+    def get_current_batch(self, watch_folder: str | None = None, limit: int = 6) -> list[PlacedPhoto]:
+        folder_prefix = self._folder_prefix(watch_folder)
+        query = """
+            SELECT
+                p.id,
+                p.source_path,
+                p.managed_path,
+                p.md5,
+                p.status,
+                p.discovered_at,
+                p.last_seen_at,
+                c.zoom,
+                c.offset_x,
+                c.offset_y
+            FROM photos p
+            INNER JOIN crop_states c ON c.photo_md5 = p.md5
+            WHERE p.status = 'pending'
+        """
+        params: tuple[object, ...]
+        if folder_prefix is not None:
+            query += " AND p.source_path LIKE ?"
+            params = (folder_prefix, limit)
+        else:
+            params = (limit,)
+        query += """
+            ORDER BY p.discovered_at ASC
+            LIMIT ?
+        """
+
         with self._connect() as connection:
-            rows = connection.execute(
-                """
-                SELECT
-                    p.id,
-                    p.source_path,
-                    p.managed_path,
-                    p.md5,
-                    p.status,
-                    p.discovered_at,
-                    p.last_seen_at,
-                    c.zoom,
-                    c.offset_x,
-                    c.offset_y
-                FROM photos p
-                INNER JOIN crop_states c ON c.photo_md5 = p.md5
-                WHERE p.status = 'pending'
-                ORDER BY p.discovered_at ASC
-                LIMIT ?
-                """,
-                (limit,),
-            ).fetchall()
+            rows = connection.execute(query, params).fetchall()
 
         placed: list[PlacedPhoto] = []
         for index, row in enumerate(rows):
@@ -174,11 +192,22 @@ class QueueRepository:
             )
         return placed
 
-    def count_pending(self) -> int:
+    def count_pending(self, watch_folder: str | None = None) -> int:
+        folder_prefix = self._folder_prefix(watch_folder)
         with self._connect() as connection:
-            row = connection.execute(
-                "SELECT COUNT(*) AS count FROM photos WHERE status = 'pending'"
-            ).fetchone()
+            if folder_prefix is None:
+                row = connection.execute(
+                    "SELECT COUNT(*) AS count FROM photos WHERE status = 'pending'"
+                ).fetchone()
+            else:
+                row = connection.execute(
+                    """
+                    SELECT COUNT(*) AS count
+                    FROM photos
+                    WHERE status = 'pending' AND source_path LIKE ?
+                    """,
+                    (folder_prefix,),
+                ).fetchone()
         return int(row["count"])
 
     def save_crop_state(self, md5: str, crop_state: CropState) -> None:
@@ -192,6 +221,18 @@ class QueueRepository:
                 """,
                 (normalized.zoom, normalized.offset_x, normalized.offset_y, md5),
             )
+
+    def clear_pending(self, watch_folder: str | None = None) -> int:
+        folder_prefix = self._folder_prefix(watch_folder)
+        with self._connect() as connection:
+            if folder_prefix is None:
+                cursor = connection.execute("DELETE FROM photos WHERE status = 'pending'")
+            else:
+                cursor = connection.execute(
+                    "DELETE FROM photos WHERE status = 'pending' AND source_path LIKE ?",
+                    (folder_prefix,),
+                )
+        return cursor.rowcount
 
     def mark_printed(self, md5_values: list[str]) -> None:
         if not md5_values:

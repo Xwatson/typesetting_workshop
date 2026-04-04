@@ -60,7 +60,7 @@ class SettingsPanel(QWidget):
 
         root_layout.addLayout(form_layout)
 
-        tip = QLabel("设置会立即保存，下次启动程序时会自动恢复上一次的监听文件夹和打印机。")
+        tip = QLabel("设置会立即保存。切换监听文件夹后，预览区只显示当前监听文件夹里的待打印照片。")
         tip.setWordWrap(True)
         root_layout.addWidget(tip)
         root_layout.addStretch(1)

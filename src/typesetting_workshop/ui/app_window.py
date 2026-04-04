@@ -44,9 +44,7 @@ class AppWindow(QMainWindow):
             self.repository = QueueRepository(data_root / "queue.sqlite3")
         except sqlite3.Error:
             self.repository = QueueRepository(":memory:")
-            self.persistence_warning = (
-                "当前环境无法使用持久化存储，程序已切换为仅当前会话有效的内存队列。"
-            )
+            self.persistence_warning = "当前环境无法使用持久化存储，程序已切换为仅当前会话有效的内存队列。"
         self.renderer = RendererService()
         self.importer = PhotoImportService(self.repository, data_root / "imported_images")
         self.folder_watcher = FolderWatchService(self.importer)
@@ -61,6 +59,7 @@ class AppWindow(QMainWindow):
         self.setCentralWidget(tabs)
         self.setStatusBar(QStatusBar())
 
+        self.preview_page.clearRequested.connect(self.clear_current_queue)
         self.preview_page.exportRequested.connect(self.export_current_page)
         self.preview_page.printRequested.connect(self.print_current_batch)
         self.preview_page.cropChanged.connect(self.handle_crop_changed)
@@ -86,11 +85,11 @@ class AppWindow(QMainWindow):
         self._sync_print_button_state()
 
     def refresh_batch(self) -> None:
-        batch = self.repository.get_current_batch()
-        total_pending = self.repository.count_pending()
+        batch = self.repository.get_current_batch(self.settings.watch_folder)
+        total_pending = self.repository.count_pending(self.settings.watch_folder)
         self.preview_page.set_batch(batch, total_pending)
         self._sync_print_button_state()
-        self.statusBar().showMessage(f"待打印照片：{total_pending} 张", 3000)
+        self.statusBar().showMessage(f"当前监听文件夹待打印照片：{total_pending} 张", 3000)
 
     def handle_settings_changed(self, settings: AppSettings) -> None:
         self.settings = AppSettings(
@@ -105,8 +104,26 @@ class AppWindow(QMainWindow):
     def handle_crop_changed(self, md5_value: str, crop_state: CropState) -> None:
         self.repository.save_crop_state(md5_value, crop_state)
 
+    def clear_current_queue(self) -> None:
+        total_pending = self.repository.count_pending(self.settings.watch_folder)
+        if total_pending == 0:
+            self.show_warning("当前监听文件夹没有可清空的待打印照片。")
+            return
+
+        answer = QMessageBox.question(
+            self,
+            "清空当前队列",
+            "确定要清空当前监听文件夹中的待打印照片队列吗？此操作不会删除原始图片文件。",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        removed = self.repository.clear_pending(self.settings.watch_folder)
+        self.refresh_batch()
+        self.statusBar().showMessage(f"已清空 {removed} 张待打印照片。", 5000)
+
     def export_current_page(self) -> None:
-        batch = self.repository.get_current_batch()
+        batch = self.repository.get_current_batch(self.settings.watch_folder)
         if not batch:
             self.show_warning("当前没有可导出的照片。")
             return
@@ -124,7 +141,7 @@ class AppWindow(QMainWindow):
         self.statusBar().showMessage(f"已导出到：{destination}", 5000)
 
     def print_current_batch(self) -> None:
-        batch = self.repository.get_current_batch()
+        batch = self.repository.get_current_batch(self.settings.watch_folder)
         success, message = self.print_service.print_batch(
             batch,
             self.settings.printer_name or "",

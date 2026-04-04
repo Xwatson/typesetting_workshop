@@ -28,7 +28,7 @@ class RendererService:
         painter = QPainter(image)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-        self._paint_page(painter, QRectF(0, 0, width_px, height_px), batch, None, dpi)
+        self.paint_page(painter, QRectF(0, 0, width_px, height_px), batch, dpi=dpi)
         painter.end()
         return image
 
@@ -43,7 +43,17 @@ class RendererService:
         batch: list[PlacedPhoto],
         selected_md5: str | None,
     ) -> None:
-        self._paint_page(painter, target_rect, batch, selected_md5, None)
+        self.paint_page(painter, target_rect, batch, selected_md5=selected_md5)
+
+    def paint_page(
+        self,
+        painter: QPainter,
+        target_rect: QRectF,
+        batch: list[PlacedPhoto],
+        selected_md5: str | None = None,
+        dpi: int | None = None,
+    ) -> None:
+        self._paint_page(painter, target_rect, batch, selected_md5, dpi)
 
     def get_slot_rects(self, target_rect: QRectF) -> dict[int, QRectF]:
         scale = min(target_rect.width() / A4_WIDTH_MM, target_rect.height() / A4_HEIGHT_MM)

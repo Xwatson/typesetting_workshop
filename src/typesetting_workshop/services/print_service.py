@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QRectF
+from PySide6.QtCore import QRectF, QMarginsF
 from PySide6.QtGui import QPainter, QPageLayout, QPageSize
 from PySide6.QtPrintSupport import QPrinter, QPrinterInfo
 
@@ -28,18 +28,20 @@ class PrintService:
         printer.setPageOrientation(QPageLayout.Orientation.Portrait)
         printer.setResolution(dpi)
         printer.setFullPage(True)
+        printer.setPageMargins(QMarginsF(0, 0, 0, 0), QPageLayout.Unit.Millimeter)
 
         if not printer.isValid():
             return False, "所选打印机当前不可用。"
 
-        image = self.renderer.render_page(batch, dpi)
         painter = QPainter()
         if not painter.begin(printer):
             return False, "无法提交打印任务。"
 
         try:
-            page_rect = printer.pageRect(QPrinter.Unit.DevicePixel)
-            painter.drawImage(QRectF(page_rect), image, QRectF(image.rect()))
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+            page_rect = QRectF(printer.paperRect(QPrinter.Unit.DevicePixel))
+            self.renderer.paint_page(painter, page_rect, batch)
         finally:
             painter.end()
         return True, "打印任务已提交到系统打印队列。"
