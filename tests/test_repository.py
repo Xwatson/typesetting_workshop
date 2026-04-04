@@ -62,6 +62,16 @@ class RepositoryTests(unittest.TestCase):
         self.assertEqual(self.repo.count_pending(r"C:\photos\a"), 0)
         self.assertEqual(self.repo.count_pending(r"C:\photos\b"), 1)
 
+    def test_pending_queries_support_posix_paths(self) -> None:
+        self.repo.register_photo("/photos/a/1.jpg", "managed/a1.jpg", "md5-a1")
+        self.repo.register_photo("/photos/a/2.jpg", "managed/a2.jpg", "md5-a2")
+        self.repo.register_photo("/photos/b/1.jpg", "managed/b1.jpg", "md5-b1")
+
+        batch = self.repo.get_current_batch("/photos/a")
+        self.assertEqual(len(batch), 2)
+        self.assertEqual(self.repo.count_pending("/photos/a"), 2)
+        self.assertEqual(self.repo.count_pending("/photos/b"), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
