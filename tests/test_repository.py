@@ -5,6 +5,7 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from typesetting_workshop.models import AppSettings, CropState  # noqa: E402
+from typesetting_workshop.services.layout import PAGE_CAPACITY  # noqa: E402
 from typesetting_workshop.services.repository import QueueRepository  # noqa: E402
 
 
@@ -71,6 +72,57 @@ class RepositoryTests(unittest.TestCase):
         self.assertEqual(len(batch), 2)
         self.assertEqual(self.repo.count_pending("/photos/a"), 2)
         self.assertEqual(self.repo.count_pending("/photos/b"), 1)
+
+    def test_clear_printed_only_removes_printed_records(self) -> None:
+        self.repo.register_photo("/photos/a/1.jpg", "managed/a1.jpg", "md5-a1")
+        self.repo.register_photo("/photos/a/2.jpg", "managed/a2.jpg", "md5-a2")
+        self.repo.mark_printed(["md5-a1"])
+
+        removed = self.repo.clear_printed()
+
+        self.assertEqual(removed, 1)
+        self.assertEqual(self.repo.count_printed(), 0)
+        self.assertEqual(self.repo.count_pending("/photos/a"), 1)
+
+    def test_current_batch_defaults_to_page_capacity(self) -> None:
+        for index in range(PAGE_CAPACITY + 2):
+            self.repo.register_photo(
+                f"/photos/a/{index}.jpg",
+                f"managed/{index}.jpg",
+                f"md5-{index}",
+            )
+
+        batch = self.repo.get_current_batch("/photos/a")
+
+        self.assertEqual(len(batch), PAGE_CAPACITY)
+
+    def test_batch_page_includes_printed_records_and_supports_paging(self) -> None:
+        for index in range(PAGE_CAPACITY + 1):
+            self.repo.register_photo(
+                f"/photos/a/{index}.jpg",
+                f"managed/{index}.jpg",
+                f"md5-page-{index}",
+            )
+        self.repo.mark_printed(["md5-page-0", "md5-page-1"])
+
+        first_page = self.repo.get_batch_page("/photos/a", page_index=0)
+        second_page = self.repo.get_batch_page("/photos/a", page_index=1)
+
+        self.assertEqual(len(first_page), PAGE_CAPACITY)
+        self.assertEqual(first_page[0].record.status, "printed")
+        self.assertEqual(first_page[1].record.status, "printed")
+        self.assertEqual(len(second_page), 1)
+        self.assertEqual(second_page[0].slot_index, 0)
+
+    def test_count_photos_and_printed_can_be_scoped_to_watch_folder(self) -> None:
+        self.repo.register_photo(r"C:\photos\a\1.jpg", "managed/a1.jpg", "md5-a1")
+        self.repo.register_photo(r"C:\photos\a\2.jpg", "managed/a2.jpg", "md5-a2")
+        self.repo.register_photo(r"C:\photos\b\1.jpg", "managed/b1.jpg", "md5-b1")
+        self.repo.mark_printed(["md5-a1", "md5-b1"])
+
+        self.assertEqual(self.repo.count_photos(r"C:\photos\a"), 2)
+        self.assertEqual(self.repo.count_printed(r"C:\photos\a"), 1)
+        self.assertEqual(self.repo.count_printed(r"C:\photos\b"), 1)
 
 
 if __name__ == "__main__":

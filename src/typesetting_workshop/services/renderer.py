@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPen
+from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPainterPath, QPen
 
 from typesetting_workshop.models import CropState, PlacedPhoto
 from typesetting_workshop.services.layout import (
     A4_HEIGHT_MM,
     A4_WIDTH_MM,
+    CUT_GUIDE_X_MM,
+    IMAGE_DIAMETER_MM,
+    OUTER_DIAMETER_MM,
     PAGE_CAPACITY,
+    SAFE_AREA_DIAMETER_MM,
     SLOT_SIZE_MM,
     SLOTS,
+    WHITE_MARGIN_PER_SIDE_MM,
     mm_to_pixels,
     page_size_pixels,
 )
@@ -150,6 +155,7 @@ class RendererService:
         painter.fillRect(page_rect, QColor("#ffffff"))
         painter.setPen(QPen(QColor("#d0d5dd"), 1.2))
         painter.drawRect(page_rect)
+        self._draw_center_cut_guide(painter, page_rect, dpi)
 
         batch_by_slot = {placed.slot_index: placed for placed in batch}
         slot_rects = self.get_slot_rects(page_rect)
@@ -173,22 +179,33 @@ class RendererService:
         dpi: int | None,
     ) -> None:
         painter.save()
-        painter.fillRect(slot_rect, QColor("#f8fafc"))
+        painter.fillRect(slot_rect, QColor("#ffffff"))
+        outer_circle_rect = self._circle_rect(slot_rect, OUTER_DIAMETER_MM, SLOT_SIZE_MM)
+        image_circle_rect = self._circle_rect(slot_rect, IMAGE_DIAMETER_MM, SLOT_SIZE_MM)
+        safe_area_rect = self._circle_rect(slot_rect, SAFE_AREA_DIAMETER_MM, SLOT_SIZE_MM)
 
         if placed is not None:
             image = self.get_image(placed.record.managed_path)
-            self._draw_cover_image(painter, slot_rect, image, placed.crop_state)
+            self._draw_cover_image(painter, image_circle_rect, image, placed.crop_state)
         else:
-            painter.setPen(QPen(QColor("#94a3b8"), 1, Qt.PenStyle.DashLine))
-            painter.drawRect(slot_rect)
-            font = QFont()
-            font.setPointSizeF(10 if dpi is None else max(14.0, mm_to_pixels(4, dpi)))
-            painter.setFont(font)
-            painter.setPen(QColor("#64748b"))
-            painter.drawText(slot_rect, Qt.AlignmentFlag.AlignCenter, "空白")
+            if dpi is None:
+                painter.setPen(QPen(QColor("#94a3b8"), 1, Qt.PenStyle.DashLine))
+                painter.drawEllipse(outer_circle_rect)
+                font = QFont()
+                font.setPointSizeF(10)
+                painter.setFont(font)
+                painter.setPen(QColor("#64748b"))
+                painter.drawText(outer_circle_rect, Qt.AlignmentFlag.AlignCenter, "空白")
 
-        painter.setPen(QPen(QColor("#2563eb") if highlight else QColor("#cbd5e1"), 3 if highlight else 1.5))
-        painter.drawRect(slot_rect)
+        if dpi is None:
+            painter.setPen(QPen(QColor("#2563eb") if highlight else QColor("#cbd5e1"), 3 if highlight else 1.5))
+            painter.drawEllipse(outer_circle_rect)
+            painter.setPen(QPen(QColor("#dc2626"), 1.2, Qt.PenStyle.DashLine))
+            painter.drawEllipse(image_circle_rect)
+            painter.setPen(QPen(QColor("#f59e0b"), 1.0, Qt.PenStyle.DotLine))
+            painter.drawEllipse(safe_area_rect)
+            if placed is not None and placed.record.status == "printed":
+                self._draw_printed_badge(painter, outer_circle_rect)
         painter.restore()
 
     def _draw_cover_image(
@@ -215,8 +232,52 @@ class RendererService:
         image_rect = QRectF(image_x, image_y, scaled_width, scaled_height)
 
         painter.save()
-        painter.setClipRect(target_rect)
+        clip_path = QPainterPath()
+        clip_path.addEllipse(target_rect)
+        painter.setClipPath(clip_path)
         painter.drawImage(image_rect, image)
+        painter.restore()
+
+    def _circle_rect(self, slot_rect: QRectF, diameter_mm: float, slot_size_mm: float) -> QRectF:
+        inset_ratio = max(0.0, slot_size_mm - diameter_mm) / slot_size_mm / 2.0
+        inset_x = slot_rect.width() * inset_ratio
+        inset_y = slot_rect.height() * inset_ratio
+        return slot_rect.adjusted(inset_x, inset_y, -inset_x, -inset_y)
+
+    def _draw_printed_badge(self, painter: QPainter, circle_rect: QRectF) -> None:
+        painter.save()
+        overlay_path = QPainterPath()
+        overlay_path.addEllipse(circle_rect)
+        painter.setClipPath(overlay_path)
+        painter.fillRect(circle_rect, QColor(15, 23, 42, 72))
+        painter.restore()
+
+        badge_rect = QRectF(
+            circle_rect.left() + 6,
+            circle_rect.top() + 6,
+            min(circle_rect.width() - 12, 54),
+            22,
+        )
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor("#16a34a"))
+        painter.drawRoundedRect(badge_rect, 8, 8)
+
+        font = QFont()
+        font.setBold(True)
+        font.setPointSizeF(9.5)
+        painter.setFont(font)
+        painter.setPen(QColor("#ffffff"))
+        painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, "已打印")
+
+    def _draw_center_cut_guide(self, painter: QPainter, page_rect: QRectF, dpi: int | None) -> None:
+        painter.save()
+        color = QColor(148, 163, 184, 180 if dpi is None else 220)
+        pen = QPen(color, 1.1 if dpi is None else 1.4, Qt.PenStyle.DashLine)
+        painter.setPen(pen)
+        center_x = page_rect.left() + (CUT_GUIDE_X_MM / A4_WIDTH_MM) * page_rect.width()
+        top = page_rect.top() + 8
+        bottom = page_rect.bottom() - 8
+        painter.drawLine(center_x, top, center_x, bottom)
         painter.restore()
 
     def _draw_calibration_grid(self, painter: QPainter, page_rect: QRectF, scale: float) -> None:
@@ -256,7 +317,7 @@ class RendererService:
         painter.drawText(
             hint_rect,
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
-            "请使用直尺测量下方的 100mm 标尺和 74mm 方框，确认打印尺寸是否准确。",
+            "请测量 100mm 标尺、72mm 外切圆、64mm 铺图圆，并参考 54mm 安全区，确认裁切容错是否足够。",
         )
 
         ruler_pen = QPen(QColor("#111827"), 2)
@@ -294,14 +355,35 @@ class RendererService:
             "垂直标尺 100mm",
         )
 
-        square_rect = self._mm_rect(page_rect, scale, 105, 70, SLOT_SIZE_MM, SLOT_SIZE_MM)
-        painter.setPen(QPen(QColor("#dc2626"), 2.4))
-        painter.drawRect(square_rect)
+        outer_circle_rect = self._mm_rect(page_rect, scale, 105, 70, OUTER_DIAMETER_MM, OUTER_DIAMETER_MM)
+        image_circle_rect = self._mm_rect(
+            page_rect,
+            scale,
+            105 + WHITE_MARGIN_PER_SIDE_MM,
+            70 + WHITE_MARGIN_PER_SIDE_MM,
+            IMAGE_DIAMETER_MM,
+            IMAGE_DIAMETER_MM,
+        )
+        safe_margin_mm = (OUTER_DIAMETER_MM - SAFE_AREA_DIAMETER_MM) / 2.0
+        safe_area_rect = self._mm_rect(
+            page_rect,
+            scale,
+            105 + safe_margin_mm,
+            70 + safe_margin_mm,
+            SAFE_AREA_DIAMETER_MM,
+            SAFE_AREA_DIAMETER_MM,
+        )
+        painter.setPen(QPen(QColor("#2563eb"), 2.4))
+        painter.drawEllipse(outer_circle_rect)
+        painter.setPen(QPen(QColor("#dc2626"), 2.0, Qt.PenStyle.DashLine))
+        painter.drawEllipse(image_circle_rect)
+        painter.setPen(QPen(QColor("#f59e0b"), 1.6, Qt.PenStyle.DotLine))
+        painter.drawEllipse(safe_area_rect)
         painter.setPen(QColor("#111827"))
         painter.drawText(
-            self._mm_rect(page_rect, scale, 100, 146, 86, 10),
+            self._mm_rect(page_rect, scale, 84, 146, 118, 20),
             Qt.AlignmentFlag.AlignCenter,
-            f"参考方框 {int(SLOT_SIZE_MM)}mm x {int(SLOT_SIZE_MM)}mm",
+            f"外切圆 {int(OUTER_DIAMETER_MM)}mm，铺图圆 {int(IMAGE_DIAMETER_MM)}mm，安全区 {int(SAFE_AREA_DIAMETER_MM)}mm",
         )
 
         center_rect = self._mm_rect(page_rect, scale, 95, 200, 20, 20)

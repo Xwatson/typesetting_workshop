@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Iterator
 
 from typesetting_workshop.models import AppSettings, CropState, PhotoRecord, PlacedPhoto
+from typesetting_workshop.services.layout import PAGE_CAPACITY
 
 
 class QueueRepository:
@@ -136,7 +137,39 @@ class QueueRepository:
             )
             return True
 
-    def get_current_batch(self, watch_folder: str | None = None, limit: int = 6) -> list[PlacedPhoto]:
+    def get_current_batch(
+        self,
+        watch_folder: str | None = None,
+        limit: int = PAGE_CAPACITY,
+    ) -> list[PlacedPhoto]:
+        return self._fetch_batch(
+            watch_folder=watch_folder,
+            limit=limit,
+            offset=0,
+            pending_only=True,
+        )
+
+    def get_batch_page(
+        self,
+        watch_folder: str | None = None,
+        page_index: int = 0,
+        limit: int = PAGE_CAPACITY,
+    ) -> list[PlacedPhoto]:
+        page = max(0, page_index)
+        return self._fetch_batch(
+            watch_folder=watch_folder,
+            limit=limit,
+            offset=page * limit,
+            pending_only=False,
+        )
+
+    def _fetch_batch(
+        self,
+        watch_folder: str | None,
+        limit: int,
+        offset: int,
+        pending_only: bool,
+    ) -> list[PlacedPhoto]:
         normalized_folder = self._normalized_folder(watch_folder)
         query = """
             SELECT
@@ -152,8 +185,10 @@ class QueueRepository:
                 c.offset_y
             FROM photos p
             INNER JOIN crop_states c ON c.photo_md5 = p.md5
-            WHERE p.status = 'pending'
+            WHERE 1 = 1
         """
+        if pending_only:
+            query += " AND p.status = 'pending'"
         params: tuple[object, ...]
         if normalized_folder is not None:
             query += """
@@ -162,12 +197,13 @@ class QueueRepository:
                     OR REPLACE(p.source_path, '\\', '/') LIKE ?
                 )
             """
-            params = (normalized_folder, f"{normalized_folder}/%", limit)
+            params = (normalized_folder, f"{normalized_folder}/%", limit, offset)
         else:
-            params = (limit,)
+            params = (limit, offset)
         query += """
             ORDER BY p.discovered_at ASC
             LIMIT ?
+            OFFSET ?
         """
 
         with self._connect() as connection:
@@ -196,6 +232,25 @@ class QueueRepository:
             )
         return placed
 
+    def count_photos(self, watch_folder: str | None = None) -> int:
+        normalized_folder = self._normalized_folder(watch_folder)
+        with self._connect() as connection:
+            if normalized_folder is None:
+                row = connection.execute(
+                    "SELECT COUNT(*) AS count FROM photos"
+                ).fetchone()
+            else:
+                row = connection.execute(
+                    """
+                    SELECT COUNT(*) AS count
+                    FROM photos
+                    WHERE REPLACE(source_path, '\\', '/') = ?
+                       OR REPLACE(source_path, '\\', '/') LIKE ?
+                    """,
+                    (normalized_folder, f"{normalized_folder}/%"),
+                ).fetchone()
+        return int(row["count"])
+
     def count_pending(self, watch_folder: str | None = None) -> int:
         normalized_folder = self._normalized_folder(watch_folder)
         with self._connect() as connection:
@@ -209,6 +264,28 @@ class QueueRepository:
                     SELECT COUNT(*) AS count
                     FROM photos
                     WHERE status = 'pending'
+                      AND (
+                          REPLACE(source_path, '\\', '/') = ?
+                          OR REPLACE(source_path, '\\', '/') LIKE ?
+                      )
+                    """,
+                    (normalized_folder, f"{normalized_folder}/%"),
+                ).fetchone()
+        return int(row["count"])
+
+    def count_printed(self, watch_folder: str | None = None) -> int:
+        normalized_folder = self._normalized_folder(watch_folder)
+        with self._connect() as connection:
+            if normalized_folder is None:
+                row = connection.execute(
+                    "SELECT COUNT(*) AS count FROM photos WHERE status = 'printed'"
+                ).fetchone()
+            else:
+                row = connection.execute(
+                    """
+                    SELECT COUNT(*) AS count
+                    FROM photos
+                    WHERE status = 'printed'
                       AND (
                           REPLACE(source_path, '\\', '/') = ?
                           OR REPLACE(source_path, '\\', '/') LIKE ?
@@ -247,6 +324,11 @@ class QueueRepository:
                     """,
                     (normalized_folder, f"{normalized_folder}/%"),
                 )
+        return cursor.rowcount
+
+    def clear_printed(self) -> int:
+        with self._connect() as connection:
+            cursor = connection.execute("DELETE FROM photos WHERE status = 'printed'")
         return cursor.rowcount
 
     def mark_printed(self, md5_values: list[str]) -> None:
